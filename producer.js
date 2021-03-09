@@ -15,7 +15,7 @@ const queueName = process.env.QUEUE_NAME || "<queue name>";
 const csv = require("csvtojson");
 
 // Node.js package used to work with dates and times
-const moment = require("moment");
+const { Temporal } = require("proposal-temporal");
 
 // send the reminder "x" minutes before the appointment time
 const leadTimeInMinutes = 15;
@@ -35,15 +35,23 @@ async function main() {
     for (const row of appointmentsData) {
       const mqData = {
         to: row["Phone"],
-        body: `Hello ${row['Name']}, you have an appointment with us in ${leadTimeInMinutes}
-minutes. See you soon.`
+        body: `Hello ${row["Name"]}, you have an appointment with us in ${leadTimeInMinutes}
+minutes. See you soon.`,
       };
 
-      if (toDelayFromDate(row["AppointmentDateTime"]) - Date.now() > 0) {
-        console.log(new Date(toDelayFromDate(row["AppointmentDateTime"])));
-        console.log("publish...");
+      const instant = toDelayFromDate(row["AppointmentDateTime"]);
 
-        const scheduledEnqueueTimeUtc = new Date(toDelayFromDate(row["AppointmentDateTime"]));
+      if (
+        instant.since(
+          Temporal.now.instant()
+        ).sign > 0
+      ) {
+        const scheduledEnqueueTimeUtc = new Date(
+          instant.epochMilliseconds
+        );
+
+        console.log(instant.toLocaleString());
+        console.log("publish...");
 
         await sender.scheduleMessages(mqData, scheduledEnqueueTimeUtc);
       }
@@ -61,7 +69,13 @@ minutes. See you soon.`
 // utility function, returns milliseconds
 // calculates the difference between the appointment time and the current time
 function toDelayFromDate(dateTime) {
-  return moment(dateTime).subtract(leadTimeInMinutes, 'minutes').valueOf();
+  const timeZone = Temporal.now.timeZone();
+  const instant = Temporal.PlainDateTime.from(dateTime)
+    .toZonedDateTime(timeZone)
+    .toInstant()
+    .subtract({ minutes: leadTimeInMinutes });
+
+  return instant;
 }
 
 main().catch((err) => {
